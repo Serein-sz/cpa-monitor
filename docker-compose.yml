@@ -1,0 +1,16 @@
+services:
+  ingestor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    networks:
+      - cpa-net
+    environment:
+      CPA__DATABASE__URL: "postgres://postgres:postgres@postgres:5432/cpa_monitor"
+      CPA__REDIS__URL: "redis://redis:8317"
+      CPA__REDIS__CHANNEL: "usage"
+    restart: unless-stopped
+
+networks:
+  cpa-net:
+    external: true

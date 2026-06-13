@@ -1,0 +1,6 @@
+[database]
+url = "postgres://postgres:postgres@localhost:5432/cpa_monitor"
+
+[redis]
+url = "redis://127.0.0.1:6379"
+channel = "usage"

@@ -1,0 +1,12 @@
+[package]
+name = "cpa-ingestor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cpa-config.workspace = true
+cpa-store.workspace = true
+futures-util.workspace = true
+redis.workspace = true
+tokio.workspace = true

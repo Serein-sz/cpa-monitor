@@ -79,18 +79,17 @@ async fn run_dashboard(
             .unwrap_or(Duration::ZERO)
             .min(Duration::from_millis(100));
 
-        if event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                        KeyCode::Char('r') => {
-                            app.refresh(db).await;
-                            next_refresh = Instant::now() + REFRESH_INTERVAL;
-                        }
-                        _ => {}
-                    }
+        if event::poll(timeout)?
+            && let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                KeyCode::Char('r') => {
+                    app.refresh(db).await;
+                    next_refresh = Instant::now() + REFRESH_INTERVAL;
                 }
+                _ => {}
             }
         }
 

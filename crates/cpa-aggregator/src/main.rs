@@ -137,33 +137,33 @@ fn render_summary(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let lines = vec![
         Line::from(vec![
             label("Tokens "),
-            value(format_number(summary.total_tokens)),
+            value(format_tokens(summary.total_tokens)),
             label("   Requests "),
-            value(format_number(summary.request_count)),
+            value(format_count(summary.request_count)),
             label("   Failed "),
             danger(format!(
-                "{} ({:.2}%)",
-                format_number(summary.failed_count),
-                summary.failure_rate * 100.0
+                "{} ({})",
+                format_count(summary.failed_count),
+                format_percent(summary.failure_rate)
             )),
             label("   Avg "),
-            value(format!("{:.0}ms", summary.avg_latency_ms)),
+            value(format_duration_ms(summary.avg_latency_ms.round() as i64)),
             label("   P95 "),
-            value(format!("{:.0}ms", summary.p95_latency_ms)),
+            value(format_duration_ms(summary.p95_latency_ms.round() as i64)),
         ]),
         Line::from(vec![
             label("Input "),
-            value(format_number(summary.input_tokens)),
+            value(format_tokens(summary.input_tokens)),
             label("   Output "),
-            value(format_number(summary.output_tokens)),
+            value(format_tokens(summary.output_tokens)),
             label("   Reasoning "),
-            value(format_number(summary.reasoning_tokens)),
+            value(format_tokens(summary.reasoning_tokens)),
             label("   Cached "),
-            value(format_number(summary.cached_tokens)),
+            value(format_tokens(summary.cached_tokens)),
         ]),
         Line::from(vec![
             label("Last refresh "),
-            value(app.last_updated.format("%H:%M:%S UTC").to_string()),
+            value(format_refresh_time(app.last_updated)),
             label("   Window "),
             value("24h"),
             label("   Auto "),
@@ -189,9 +189,9 @@ fn render_grouped_table(
     let table_rows = rows.iter().map(|row| {
         Row::new(vec![
             Cell::from(row.name.clone()).style(primary()),
-            Cell::from(format_number(row.total_tokens)),
-            Cell::from(format_number(row.request_count)),
-            Cell::from(format_number(row.failed_count)).style(if row.failed_count > 0 {
+            Cell::from(format_tokens(row.total_tokens)),
+            Cell::from(format_count(row.request_count)),
+            Cell::from(format_count(row.failed_count)).style(if row.failed_count > 0 {
                 status_bad()
             } else {
                 muted()
@@ -265,9 +265,9 @@ fn render_trends(frame: &mut Frame<'_>, area: Rect, app: &App) {
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             label("Current bucket "),
-            value(format_number(now)),
+            value(format_tokens(now)),
             label(" tokens   Peak "),
-            value(format_number(peak)),
+            value(format_tokens(peak)),
             label(" tokens"),
         ]))
         .style(secondary()),
@@ -281,8 +281,8 @@ fn render_recent(frame: &mut Frame<'_>, area: Rect, rows: &[RecentUsageRequest])
             Cell::from(row.timestamp.format("%H:%M:%S").to_string()),
             Cell::from(row.model.clone()),
             Cell::from(row.provider.clone()),
-            Cell::from(format_number(row.total_tokens)),
-            Cell::from(format!("{}ms", row.latency_ms)),
+            Cell::from(format_tokens(row.total_tokens)),
+            Cell::from(format_duration_ms(row.latency_ms)),
             Cell::from(if row.failed { "failed" } else { "ok" }).style(if row.failed {
                 status_bad()
             } else {
@@ -357,17 +357,142 @@ fn status_bad() -> Style {
     Style::default().fg(Color::Red)
 }
 
-fn format_number(value: i64) -> String {
-    let sign = if value < 0 { "-" } else { "" };
-    let digits = value.abs().to_string();
-    let mut out = String::new();
+fn format_tokens(value: i64) -> String {
+    format_compact_decimal(value)
+}
 
-    for (index, ch) in digits.chars().rev().enumerate() {
-        if index > 0 && index % 3 == 0 {
-            out.push(',');
+fn format_count(value: i64) -> String {
+    format_compact_decimal(value)
+}
+
+fn format_compact_decimal(value: i64) -> String {
+    let sign = if value < 0 { "-" } else { "" };
+    let abs = value.abs() as f64;
+
+    let (scaled, suffix) = if abs >= 1_000_000_000.0 {
+        (abs / 1_000_000_000.0, "B")
+    } else if abs >= 1_000_000.0 {
+        (abs / 1_000_000.0, "M")
+    } else if abs >= 1_000.0 {
+        (abs / 1_000.0, "K")
+    } else {
+        return format!("{value}");
+    };
+
+    format!("{sign}{}{}", trim_one_decimal(scaled), suffix)
+}
+
+fn format_duration_ms(value: i64) -> String {
+    let sign = if value < 0 { "-" } else { "" };
+    let abs = value.abs();
+
+    if abs < 1_000 {
+        format!("{value}ms")
+    } else if abs < 60_000 {
+        let seconds = abs as f64 / 1_000.0;
+        format!("{sign}{}s", trim_one_decimal(seconds))
+    } else {
+        let minutes = abs / 60_000;
+        let seconds = (abs % 60_000) / 1_000;
+        if seconds == 0 {
+            format!("{sign}{minutes}m")
+        } else {
+            format!("{sign}{minutes}m {seconds}s")
         }
-        out.push(ch);
+    }
+}
+
+fn format_percent(rate: f64) -> String {
+    if rate == 0.0 {
+        "0%".to_owned()
+    } else {
+        let percent = rate * 100.0;
+        if percent.abs() < 0.01 {
+            if percent.is_sign_negative() {
+                ">-0.01%".to_owned()
+            } else {
+                "<0.01%".to_owned()
+            }
+        } else {
+            format!("{}%", trim_two_decimals(percent))
+        }
+    }
+}
+
+fn format_refresh_time(value: chrono::DateTime<chrono::Utc>) -> String {
+    let offset = chrono::FixedOffset::east_opt(8 * 60 * 60).expect("UTC+8 offset should be valid");
+    value
+        .with_timezone(&offset)
+        .format("%H:%M:%S UTC+8")
+        .to_string()
+}
+
+fn trim_one_decimal(value: f64) -> String {
+    let formatted = format!("{value:.1}");
+    trim_decimal_zeros(formatted)
+}
+
+fn trim_two_decimals(value: f64) -> String {
+    let formatted = format!("{value:.2}");
+    trim_decimal_zeros(formatted)
+}
+
+fn trim_decimal_zeros(mut value: String) -> String {
+    if value.contains('.') {
+        while value.ends_with('0') {
+            value.pop();
+        }
+        if value.ends_with('.') {
+            value.pop();
+        }
+    }
+    value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        format_count, format_duration_ms, format_percent, format_refresh_time, format_tokens,
+    };
+    use chrono::TimeZone;
+
+    #[test]
+    fn formats_compact_tokens_and_counts() {
+        assert_eq!(format_tokens(999), "999");
+        assert_eq!(format_tokens(1_000), "1K");
+        assert_eq!(format_tokens(1_250), "1.2K");
+        assert_eq!(format_tokens(18_400), "18.4K");
+        assert_eq!(format_tokens(1_250_000), "1.2M");
+        assert_eq!(format_tokens(125_000_000), "125M");
+        assert_eq!(format_tokens(1_250_000_000), "1.2B");
+        assert_eq!(format_count(-1_250), "-1.2K");
     }
 
-    format!("{sign}{}", out.chars().rev().collect::<String>())
+    #[test]
+    fn formats_latency_by_magnitude() {
+        assert_eq!(format_duration_ms(850), "850ms");
+        assert_eq!(format_duration_ms(1_000), "1s");
+        assert_eq!(format_duration_ms(1_500), "1.5s");
+        assert_eq!(format_duration_ms(59_900), "59.9s");
+        assert_eq!(format_duration_ms(60_000), "1m");
+        assert_eq!(format_duration_ms(72_000), "1m 12s");
+        assert_eq!(format_duration_ms(-1_500), "-1.5s");
+    }
+
+    #[test]
+    fn formats_rates_without_hiding_tiny_nonzero_values() {
+        assert_eq!(format_percent(0.0), "0%");
+        assert_eq!(format_percent(0.0012), "0.12%");
+        assert_eq!(format_percent(0.42), "42%");
+        assert_eq!(format_percent(0.0000001), "<0.01%");
+    }
+
+    #[test]
+    fn formats_refresh_time_as_utc_plus_8() {
+        let time = chrono::Utc
+            .with_ymd_and_hms(2026, 4, 24, 16, 30, 5)
+            .unwrap();
+
+        assert_eq!(format_refresh_time(time), "00:30:05 UTC+8");
+    }
 }

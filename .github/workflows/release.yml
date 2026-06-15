@@ -26,6 +26,9 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             binary_suffix: ''
+          - os: Windows-x86_64
+            target: x86_64-pc-windows-msvc
+            binary_suffix: ''
 
     steps:
       - uses: actions/checkout@v4

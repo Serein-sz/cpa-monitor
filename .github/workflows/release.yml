@@ -5,82 +5,126 @@ on:
     tags:
       - "v*"
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
 permissions:
   contents: write
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+    name: Build ${{ matrix.platform.os-name }}
+    runs-on: ${{ matrix.platform.runs-on }}
     timeout-minutes: 45
+
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
+        platform:
+          - os-name: Linux-x86_64
+            runs-on: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            archive_name: cpa-monitor-linux-amd64
             binary_suffix: ""
-          - os: macos-latest
+
+          - os-name: macOS-x86_64
+            runs-on: macos-latest
             target: x86_64-apple-darwin
+            archive_name: cpa-monitor-darwin-amd64
             binary_suffix: ""
-          - os: macos-latest
+
+          - os-name: macOS-aarch64
+            runs-on: macos-latest
             target: aarch64-apple-darwin
+            archive_name: cpa-monitor-darwin-arm64
             binary_suffix: ""
-          - os: Windows-x86_64
+
+          - os-name: Windows-x86_64
+            runs-on: windows-latest
             target: x86_64-pc-windows-msvc
-            binary_suffix: ""
+            archive_name: cpa-monitor-windows-amd64
+            binary_suffix: ".exe"
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Build binaries
+        uses: houseabsolute/actions-rust-cross@v1
         with:
-          targets: ${{ matrix.target }}
+          command: build
+          target: ${{ matrix.platform.target }}
+          args: "--locked --release -p cpa-ingestor -p cpa-aggregator"
+          strip: true
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-
-      - name: Install cross-compilation tools
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-
-      - name: Build release binaries
-        run: cargo build --release --target ${{ matrix.target }} -p cpa-ingestor -p cpa-aggregator
-
-      - name: Package binaries
+      - name: Prepare binaries
         shell: bash
         run: |
-          cd target/${{ matrix.target }}/release
-          tar czf cpa-monitor-${{ matrix.target }}.tar.gz \
-            cpa-ingestor${{ matrix.binary_suffix }} \
-            cpa-aggregator${{ matrix.binary_suffix }}
-          mv cpa-monitor-${{ matrix.target }}.tar.gz ${{ github.workspace }}/
+          mkdir -p bin
 
-      - name: Upload artifacts
+          RELEASE_DIR="target/${{ matrix.platform.target }}/release"
+          SUFFIX="${{ matrix.platform.binary_suffix }}"
+
+          cp "$RELEASE_DIR/cpa-ingestor$SUFFIX" \
+             "bin/cpa-ingestor-${{ matrix.platform.target }}$SUFFIX"
+
+          cp "$RELEASE_DIR/cpa-aggregator$SUFFIX" \
+             "bin/cpa-aggregator-${{ matrix.platform.target }}$SUFFIX"
+
+      - name: Compress package
+        shell: bash
+        run: |
+          cd bin
+
+          tar czf "${{ matrix.platform.archive_name }}.tar.gz" \
+            "cpa-ingestor-${{ matrix.platform.target }}${{ matrix.platform.binary_suffix }}" \
+            "cpa-aggregator-${{ matrix.platform.target }}${{ matrix.platform.binary_suffix }}"
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: cpa-monitor-${{ matrix.target }}
-          path: cpa-monitor-${{ matrix.target }}.tar.gz
+          name: ${{ matrix.platform.os-name }}
+          path: |
+            bin/${{ matrix.platform.archive_name }}.tar.gz
+            bin/cpa-ingestor-${{ matrix.platform.target }}${{ matrix.platform.binary_suffix }}
+            bin/cpa-aggregator-${{ matrix.platform.target }}${{ matrix.platform.binary_suffix }}
 
   release:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    if: startsWith(github.ref, 'refs/tags/')
 
-      - name: Download all artifacts
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: true
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          files: artifacts/*/*.tar.gz
+      - name: Display structure
+        run: ls -la artifacts/
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "cpa-monitor ${{ github.ref_name }}" \
+            --generate-notes \
+            artifacts/*

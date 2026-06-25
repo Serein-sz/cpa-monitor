@@ -163,7 +163,7 @@ fn render_summary(frame: &mut Frame<'_>, area: Rect, app: &App) {
         ]),
         Line::from(vec![
             label("Last refresh "),
-            value(format_refresh_time(app.last_updated)),
+            value(format_utc_plus_8(app.last_updated)),
             label("   Window "),
             value("24h"),
             label("   Auto "),
@@ -278,7 +278,7 @@ fn render_trends(frame: &mut Frame<'_>, area: Rect, app: &App) {
 fn render_recent(frame: &mut Frame<'_>, area: Rect, rows: &[RecentUsageRequest]) {
     let table_rows = rows.iter().map(|row| {
         Row::new(vec![
-            Cell::from(row.timestamp.format("%H:%M:%S").to_string()),
+            Cell::from(format_utc_plus_8(row.timestamp)),
             Cell::from(row.model.clone()),
             Cell::from(row.provider.clone()),
             Cell::from(format_tokens(row.total_tokens)),
@@ -419,7 +419,7 @@ fn format_percent(rate: f64) -> String {
     }
 }
 
-fn format_refresh_time(value: chrono::DateTime<chrono::Utc>) -> String {
+fn format_utc_plus_8(value: chrono::DateTime<chrono::Utc>) -> String {
     let offset = chrono::FixedOffset::east_opt(8 * 60 * 60).expect("UTC+8 offset should be valid");
     value
         .with_timezone(&offset)
@@ -452,7 +452,7 @@ fn trim_decimal_zeros(mut value: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_count, format_duration_ms, format_percent, format_refresh_time, format_tokens,
+        format_count, format_duration_ms, format_percent, format_tokens, format_utc_plus_8,
     };
     use chrono::TimeZone;
 
@@ -493,6 +493,6 @@ mod tests {
             .with_ymd_and_hms(2026, 4, 24, 16, 30, 5)
             .unwrap();
 
-        assert_eq!(format_refresh_time(time), "00:30:05 UTC+8");
+        assert_eq!(format_utc_plus_8(time), "00:30:05 UTC+8");
     }
 }
